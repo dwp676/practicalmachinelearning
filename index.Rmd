@@ -1,0 +1,98 @@
+---
+title: "Practical Machine Learning Assignment"
+author: "Derek Palmer"
+date: "December 4, 2016"
+output: html_document
+---
+
+
+#Overview
+The goal of this assignment is to use historic fitness tracker data to build a model that predicts the manner in which someone is doing an exercise.  Historic data was taken from accelerometers on the belt, forearm, arm, and dumbbell of six participants while they performed 5 different barbell lifts (both correctly and incorrectly). Training and test datasets were provided. 
+
+#Process
+
+The first step in building the model is to load both the training and test data as well as any necessary packages. During the load we must identify strings that constitute missing data. This must be applied to both training and test datasets.
+
+```{r loaddata}
+trainingdata <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", na.strings = c("#DIV/0!","NA",""))
+testingdata <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", na.strings = c("#DIV/0!","NA",""))
+```
+
+```{r install, include=FALSE} 
+#Install required packages
+install.packages("Amelia", repos = "https://cran.cnr.berkeley.edu/")
+install.packages("caret", repos = "https://cran.cnr.berkeley.edu/") 
+install.packages("rpart", repos = "https://cran.cnr.berkeley.edu/")
+install.packages("randomForest", repos = "https://cran.cnr.berkeley.edu/")
+
+library(Amelia)
+library(caret)
+library(rpart)
+library(randomForest)
+```
+
+The Amelia package allows for the quick visualization of missing data.  I want to quickly identify the extent to which there was missing data that could removed from the analysis.  This was done by both ranking records in decreasing order by missing values.
+
+```{r visualize}
+missmap(trainingdata)
+```
+
+The visualization shows a significant portion of the columns have a lot of missing data.  Therefore, I identified the columns with the most missing data to exclude from the analysis.  I chose a cutoff so that only columns with less than .01 of the values missing would be used for modeling.
+
+The next step was to clean up the datasets (train and test) by making the data columns numeric rather than factor values.  Since the initial eight columns are descriptive records rather than data they were omitted from the subsetting.  Once this process is complete the result is a relatively cleaned up training dataset with 53 columns of data.
+
+```{r clean}
+#Check which columns have high number of missing values (NAs)
+rankmissing <- sort(sapply(trainingdata, function (x) {sum(is.na(x))})/nrow(trainingdata), decreasing=TRUE)
+#Choose cutoff value
+cutoff <- .01
+#Identify columns that have very small amount of missing data
+validcolumns <- names(rankmissing[rankmissing<cutoff])
+validcolumnstest <- validcolumns[1:59]
+#Subset training and test data by columns in training with relatively complete data.
+trainsub <- subset(trainingdata, select = validcolumns)
+testsub <- subset(testingdata, select = validcolumnstest)
+#make columns numeric rather than factor values to bring us to initial clean dataset
+for(i in c(8:ncol(trainsub)-1)) {trainsub[,i] = as.numeric(as.character(trainsub[,i]))}
+for(i in c(8:ncol(testsub))) {testsub[,i] = as.numeric(as.character(testsub[,i]))}
+#Remove columns that appear to have data irrelevant to analysis. Get initial train set.
+trainset <- trainsub[,8:ncol(trainsub)]
+testset <- testsub[,8:ncol(testsub)]
+```
+
+Since we are given a training and test dataset we will evaluate models based on the training data and use cross-validate to determine which model is most likely to provide the lowest out of sample error.  Model building and cross validation will both be done using the Caret package. We'll evaluate two types of models using cross-validation:
+
+* Decision Tree
+* Random Forest
+
+The first cross-validation will be using a decision tree model
+```{r treemodel}
+set.seed(100)
+#Establish cross validation parameters
+trainCtrl <- trainControl(method = "cv", number = 10, savePredictions = TRUE)
+#Build model and display results
+treemodel1 <- train(classe ~ ., data = trainset, method = "rpart", trControl = trainCtrl)
+treemodel1
+```
+
+It appears that this model results in low estimated accuracy (high estimated out of sample error) that is barely better than flipping a coin.  We can likely do better so the next model evaluated on the training data is a Random Forest model.
+
+```{r rfmodel}
+set.seed(200)
+#Set up cross-validation paramaters via train control
+rfTRControl <- trainControl(method = "cv", number = 5)
+
+#Build initial Random Forest model with cross-validation method established
+rfmodel1 <- train(classe ~ ., data = trainset, method = 'rf', trControl = rfTRControl)
+rfmodel1
+```
+
+The optimal random forest model resulting from the cross-validation has a high estimated accuracy of ~99.5% (very low out of sample error) so we will use this model to predict the test set classe values. 
+
+```{r prediction}
+set.seed(230)
+predictrf <- predict(rfmodel1, newdata = testset)
+predictrf
+```
+
+It turns out that the predicted results from the random forest model are highly accurate. The cross-validation provided solid guidance and optimal parameters for the model that would ultimately perform best on the test set.
